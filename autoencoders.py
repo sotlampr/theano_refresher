@@ -148,3 +148,87 @@ class StackedDenoisingAutoencoder:
                 givens={self.X: X_train[batch_begin:batch_end]})
             fns.append(fn)
         return fns
+
+
+if __name__ == "__main__":
+    """ Run a nice demo.
+
+    Fetch the olivetti faces dataset, train the autoencoder and display
+    the training results in a gif.
+    Requires imagemagick on a POSIX platform
+    """
+    import os
+    import subprocess
+    import sys
+    import timeit
+    import matplotlib.pyplot as plt
+
+    from sklearn.datasets import fetch_olivetti_faces
+
+    ALPHA = 0.03
+    N_EPOCHS = 1500
+    BATCH_SIZE = 25
+    DROPOUT = 0.3
+
+    save_interval = N_EPOCHS // 50
+
+    try:
+        subprocess.check_output(["convert", "-version"])
+    except Exception as e:
+        print("Imagemagick not installed?\nExiting...")
+        sys.exit(1)
+
+    if not os.path.exists("./images/"):
+        os.makedirs("./images/")
+
+    rng = np.random.RandomState(42)
+
+    # Placeholders
+    index = T.lscalar()
+    X = T.matrix('X')
+
+    # Get and normalize data
+    faces = fetch_olivetti_faces()
+    n_samples = len(faces.data)
+    data = faces.data
+
+    train_set_X = theano.shared(value=data.astype(theano.config.floatX))
+
+    n_batches = train_set_X.get_value(borrow=True).shape[0] // BATCH_SIZE
+
+    da = DenoisingAutoencoder(rng=rng, X=X, shape=(64*64, 2048))
+
+    cost, updates = da.get_cost_updates(DROPOUT, ALPHA)
+
+    train_step = theano.function(
+        [index], cost, updates=updates,
+        givens={X: train_set_X[index * BATCH_SIZE:(index+1) * BATCH_SIZE]})
+
+    reconstruct = theano.function([X], da.reconstruct())
+
+    start = timeit.default_timer()
+
+    # Get a random image and initialize a list for visualizing progress
+    img_origin = faces.data[np.random.choice(n_samples)].reshape(64, 64)
+    plt.imsave("./images/original", img_origin, cmap='gray')
+    epoch_start = timeit.default_timer()
+    for epoch in range(N_EPOCHS):
+        c = []
+        for batch_index in range(n_batches):
+            c.append(train_step(batch_index))
+
+        if (epoch+1) % save_interval == 0:
+            img = reconstruct([img_origin.reshape(4096)]).reshape(64, 64)
+            plt.imsave("./images/out_" + str(epoch).zfill(4), img, cmap='gray')
+            duration_p_epoch = (timeit.default_timer() - epoch_start)
+            epoch_start = timeit.default_timer()
+            print("Epoch: %d, cost: %.2f, duration: %.1fs" % (
+                epoch, np.mean(c, dtype='float64'), duration_p_epoch))
+
+    end = timeit.default_timer()
+    training_time = (end - start)
+
+    print("Algorithm ran for %.2fm" % (training_time / 60))
+
+    subprocess.call(["convert", "-loop", "0", "-delay", "1",
+                     "./images/out_*.png", "./images/out.gif"])

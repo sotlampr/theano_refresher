@@ -11,9 +11,16 @@ from softmax import SoftmaxLayer, MLP
 from autoencoders import StackedDenoisingAutoencoder
 
 
-def train_sgd_mnist(clf, alpha=0.01, n_epochs=1000, batch_size=20, X=None, **kwargs):
-    """ Run a training session for the MNIST dataset using a given
-    classifier """
+def train_sgd_mnist(clf, alpha=0.01, n_epochs=1000, batch_size=20, **kwargs):
+    """ Run a training session for the MNIST dataset using a given classifier
+
+    Attributes:
+        clf: Classifier. Must be uninitialized, or else X should be given
+        alpha: learning_rate
+        n_epochs: number of epochs
+        batch_size: number of samples for each gradient update
+        kwargs: Arguments to pass to clf.__init__
+    """
     # Data loading
     mnist = datasets.fetch_mldata("MNIST original")
     X_all, y_all = mnist.data / 255, mnist.target.astype(np.int32)
@@ -27,16 +34,13 @@ def train_sgd_mnist(clf, alpha=0.01, n_epochs=1000, batch_size=20, X=None, **kwa
 
     # Placeholders
     index = T.lscalar()
-    if X:
-        clf = clf
+    if hasattr(clf, 'X'):
+        X = clf.X
     else:
         X = T.matrix('X')
         clf = clf(X=X, **kwargs)
 
     y = T.ivector('y')
-
-
-    rng = np.random.RandomState(42)
 
     cost = clf.cost(y)
 
@@ -70,7 +74,6 @@ def train_sgd_mnist(clf, alpha=0.01, n_epochs=1000, batch_size=20, X=None, **kwa
             print("\n\t Test set f1_score: %.2f" %
                 f1_score(y_test, predict_function(X_test), average='macro'))
 
-
     duration = (timeit.default_timer() - start_time) / 60
     print('')
     print(classification_report(y_test, predict_function(X_test)))
@@ -78,53 +81,22 @@ def train_sgd_mnist(clf, alpha=0.01, n_epochs=1000, batch_size=20, X=None, **kwa
         (epoch, epoch / duration, duration))
 
 
-if __name__ == "__main__":
-    """
-    print("==============\n"
-          "SIMPLE SOFTMAX\n"
-          "==============")
-    train_sgd_mnist(SoftmaxLayer,
-                    alpha=0.01,
-                    n_epochs=150,
-                    batch_size=200,
-                    shape=(28*28, 10))
-    print("===\n"
-          "MLP\n"
-          "===")
-    train_sgd_mnist(MLP,
-                    alpha=0.01,
-                    n_epochs=150,
-                    batch_size=200,
-                    shape=(28*28, 100, 10),
-                    L1_reg=0.,
-                    L2_reg=0.0001)
-    """
-    print("====================================\n"
-          "DENOISING AUTOENCODER w/ PRETRAINING\n"
-          "====================================")
-    batch_size = 3
-    alpha = 0.003
-    pretrain_epochs = 20
-
-    X = T.matrix('X')
-    clf = StackedDenoisingAutoencoder(X, [28*28, 500, 500, 500, 10],
-                                         [.1, .2, .3])
+def pretrain(clf, alpha, n_epochs, batch_size):
+    """ Pretraining for stacked denoising autoencoders
+    OBJECT MUST BE INITIALIZED!"""
+    X = clf.X
 
     mnist = datasets.fetch_mldata("MNIST original")
     X_all, y_all = mnist.data / 255, mnist.target.astype(np.int32)
 
-    X_train = theano.shared(value=X_all[:60000].astype(theano.config.floatX))
-    X_test = X_all[60000:].astype(np.float32)
-    y_train = theano.shared(value=y_all[:60000])
-    y_test = y_all[60000:]
 
-    n_batches = y_train.get_value(borrow=True).shape[0] // batch_size
+    n_batches = y_all.get_value(borrow=True).shape[0] // batch_size
 
-    fns = clf.pretraining_fns(X_train, batch_size, alpha)
+    fns = clf.pretraining_fns(X_all, batch_size, alpha)
 
     start_time = timeit.default_timer()
     for i, func in enumerate(fns):
-        for epoch in range(pretrain_epochs):
+        for epoch in range(n_epochs):
             c = []
             epoch_start = timeit.default_timer()
             for batch_index in range(n_batches):
@@ -138,8 +110,43 @@ if __name__ == "__main__":
     duration = (timeit.default_timer() - start_time) / 60
     print("Finished pretraining in %.1fmin" % duration)
 
-    train_sgd_mnist(clf,
+
+if __name__ == "__main__":
+    print("==============\n"
+          "SIMPLE SOFTMAX\n"
+          "==============")
+    train_sgd_mnist(SoftmaxLayer,
                     alpha=0.01,
-                    n_epochs=100,
+                    n_epochs=150,
                     batch_size=200,
+                    shape=(28*28, 10))
+
+    print("===\n"
+          "MLP\n"
+          "===")
+    train_sgd_mnist(MLP,
+                    alpha=0.01,
+                    n_epochs=150,
+                    batch_size=200,
+                    shape=(28*28, 400, 10),
+                    L1_reg=0.,
+                    L2_reg=0.0001)
+
+    print("====================================\n"
+          "DENOISING AUTOENCODER w/ PRETRAINING\n"
+          "====================================")
+
+    X = T.matrix('X')
+    clf = StackedDenoisingAutoencoder(X, [28*28, 400, 400, 400, 10],
+                                         [.1, .2, .3])
+
+    pretrain(clf,
+             alpha=0.001,
+             n_epochs=20,
+             batch_size=1)
+
+    train_sgd_mnist(clf,
+                    alpha=0.1,
+                    n_epochs=100,
+                    batch_size=500,
                     X=X)
