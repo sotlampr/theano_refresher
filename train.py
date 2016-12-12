@@ -87,10 +87,9 @@ def pretrain(clf, alpha, n_epochs, batch_size):
     X = clf.X
 
     mnist = datasets.fetch_mldata("MNIST original")
-    X_all, y_all = mnist.data / 255, mnist.target.astype(np.int32)
+    X_all = theano.shared(value=(mnist.data / 255).astype(theano.config.floatX))
 
-
-    n_batches = y_all.get_value(borrow=True).shape[0] // batch_size
+    n_batches = X_all.get_value(borrow=True).shape[0] // batch_size
 
     fns = clf.pretraining_fns(X_all, batch_size, alpha)
 
@@ -112,6 +111,7 @@ def pretrain(clf, alpha, n_epochs, batch_size):
 
 
 if __name__ == "__main__":
+    """
     print("==============\n"
           "SIMPLE SOFTMAX\n"
           "==============")
@@ -132,6 +132,7 @@ if __name__ == "__main__":
                     L1_reg=0.,
                     L2_reg=0.0001)
 
+    """
     print("====================================\n"
           "DENOISING AUTOENCODER w/ PRETRAINING\n"
           "====================================")
